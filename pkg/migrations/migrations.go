@@ -97,6 +97,12 @@ func LoadMigrationsDirectory(migrationDirectory string) ([]Migration, error) {
 }
 
 func SetupMigrationTable(conn driver.Conn, migrationDatabase, migrationTable string) error {
+	err := conn.Exec(context.Background(), fmt.Sprintf(`CREATE DATABASE IF NOT EXISTS %s;`, migrationDatabase))
+
+	if err != nil {
+		return err
+	}
+
 	return conn.Exec(context.Background(), fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s.%s (
 			datetime DateTime,
