@@ -24,6 +24,7 @@ const (
 type Migration struct {
 	Name          string
 	Path          string
+	Identifier    string
 	Datetime      time.Time
 	MigrationSide MigrationSide
 }
@@ -38,7 +39,7 @@ type MigrationName struct {
 
 // Parse filenames of the kind:
 // YYYY-MM-DD_HH-MM-SS_migration_name.{up|down}.sql
-func parseMigrationFilename(migrationDirectory, filename string) (*Migration, error) {
+func parseMigrationFilename(migrationDirectory, filename, identifier string) (*Migration, error) {
 	var migrationName MigrationName
 
 	if err := MigrationFilenameRegex.MatchToTarget(filename, &migrationName); err != nil {
@@ -58,6 +59,7 @@ func parseMigrationFilename(migrationDirectory, filename string) (*Migration, er
 			Name:          migrationName.Name,
 			Path:          path,
 			Datetime:      datetime,
+			Identifier:    identifier,
 			MigrationSide: MigrationUp,
 		}, nil
 	} else {
@@ -65,12 +67,13 @@ func parseMigrationFilename(migrationDirectory, filename string) (*Migration, er
 			Name:          migrationName.Name,
 			Path:          path,
 			Datetime:      datetime,
+			Identifier:    identifier,
 			MigrationSide: MigrationDown,
 		}, nil
 	}
 }
 
-func LoadMigrationsDirectory(migrationDirectory string) ([]Migration, error) {
+func LoadMigrationsDirectory(migrationDirectory, migrationIdentifier string) ([]Migration, error) {
 	dirEntries, err := os.ReadDir(migrationDirectory)
 
 	if err != nil {
@@ -84,7 +87,7 @@ func LoadMigrationsDirectory(migrationDirectory string) ([]Migration, error) {
 			continue
 		}
 
-		migration, err := parseMigrationFilename(migrationDirectory, dirEntry.Name())
+		migration, err := parseMigrationFilename(migrationDirectory, dirEntry.Name(), migrationIdentifier)
 
 		if err != nil {
 			return nil, err
@@ -96,7 +99,7 @@ func LoadMigrationsDirectory(migrationDirectory string) ([]Migration, error) {
 	return migrations, nil
 }
 
-func SetupMigrationTable(conn driver.Conn, migrationDatabase, migrationTable string) error {
+func SetupMigrationTable(conn driver.Conn, migrationDatabase, migrationTable, migrationTableStoragePolicy string) error {
 	err := conn.Exec(context.Background(), fmt.Sprintf(`CREATE DATABASE IF NOT EXISTS %s;`, migrationDatabase))
 
 	if err != nil {
@@ -107,17 +110,26 @@ func SetupMigrationTable(conn driver.Conn, migrationDatabase, migrationTable str
 		CREATE TABLE IF NOT EXISTS %s.%s (
 			datetime DateTime,
 			name String,
-			checksum String
-		) ENGINE = MergeTree ORDER BY (datetime, name)
-	`, migrationDatabase, migrationTable))
+			identifier String,
+			checksum String,
+		)
+		ENGINE = MergeTree
+		ORDER BY (datetime, name)
+		SETTINGS storage_policy = '%s';
+	`,
+		migrationDatabase,
+		migrationTable,
+		migrationTableStoragePolicy,
+	))
 }
 
 func (m *Migration) CheckIfMigrationIsApplied(conn driver.Conn, migrationDatabase, migrationTable string) (bool, error) {
 	rows, err := conn.Query(
 		context.Background(),
-		fmt.Sprintf("SELECT datetime, name, checksum FROM %s.%s WHERE name = ? AND datetime = ?", migrationDatabase, migrationTable),
+		fmt.Sprintf("SELECT datetime, name, checksum FROM %s.%s WHERE name = ? AND datetime = ? AND identifier = ?", migrationDatabase, migrationTable),
 		m.Name,
 		m.Datetime,
+		m.Identifier,
 	)
 
 	if err != nil {
@@ -160,9 +172,10 @@ func (m *Migration) StoreMigration(conn driver.Conn, migrationDatabase, migratio
 
 	return conn.Exec(
 		context.Background(),
-		fmt.Sprintf("INSERT INTO %s.%s (datetime, name, checksum) VALUES (?, ?, ?)", migrationDatabase, migrationTable),
+		fmt.Sprintf("INSERT INTO %s.%s (datetime, name, identifier, checksum) VALUES (?, ?, ?, ?)", migrationDatabase, migrationTable),
 		m.Datetime,
 		m.Name,
+		m.Identifier,
 		checksum,
 	)
 }
@@ -170,9 +183,10 @@ func (m *Migration) StoreMigration(conn driver.Conn, migrationDatabase, migratio
 func (m *Migration) RemoveMigration(conn driver.Conn, migrationDatabase, migrationTable string) error {
 	return conn.Exec(
 		context.Background(),
-		fmt.Sprintf("DELETE FROM %s.%s WHERE name = ? AND datetime = ?", migrationDatabase, migrationTable),
+		fmt.Sprintf("DELETE FROM %s.%s WHERE name = ? AND datetime = ? AND identifier = ?", migrationDatabase, migrationTable),
 		m.Name,
 		m.Datetime,
+		m.Identifier,
 	)
 }
 

@@ -22,8 +22,9 @@ var applyCmd = &cobra.Command{
 	Long:  `Apply migrations in the given folder.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		migrationFolder := viper.GetString("migrations-directory")
+		migrationIdentifier := viper.GetString("migrations-identifier")
 
-		loadedMigrations, err := migrations.LoadMigrationsDirectory(migrationFolder)
+		loadedMigrations, err := migrations.LoadMigrationsDirectory(migrationFolder, migrationIdentifier)
 
 		if err != nil {
 			slog.Error("Could not load migrations files", "error", err)
@@ -51,10 +52,16 @@ var applyCmd = &cobra.Command{
 
 		migrationDatabase := viper.GetString("migrations-database")
 		migrationTable := viper.GetString("migrations-table")
+		migrationTableStoragePolicy := viper.GetString("migrations-table-storage-policy")
+
+		if migrationTableStoragePolicy == "" {
+			slog.Error("No storage policy provided for migration table")
+			os.Exit(1)
+		}
 
 		slog.Info("Setting up migration table")
 
-		err = migrations.SetupMigrationTable(conn, migrationDatabase, migrationTable)
+		err = migrations.SetupMigrationTable(conn, migrationDatabase, migrationTable, migrationTableStoragePolicy)
 
 		if err != nil {
 			slog.Error(fmt.Sprintf("Error setting up migration table: %s", err.Error()))
